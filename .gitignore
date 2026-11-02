@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 爬虫产物（体积大，按需用 bangumi_crawler.py 重新生成）
+data/
+
+# 临时文件
+_*.png
+_*.txt
+_*.mjs
+_TEMP/
+
+# 编辑器
+.vscode/
+.idea/
