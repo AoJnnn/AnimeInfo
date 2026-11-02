@@ -386,7 +386,10 @@
     el.list.innerHTML = '';
 
     if (!filtered.length) {
-      el.list.innerHTML = '<p class="anime-empty">没有符合条件的番剧，试试放宽筛选。</p>';
+      const loading = !ready || !castReady;
+      el.list.innerHTML = loading && state.q.trim()
+        ? '<p class="anime-empty">声优 / 制作公司数据还在加载，稍等片刻会自动补上；也可以先搜番名。</p>'
+        : '<p class="anime-empty">没有符合条件的番剧，试试放宽筛选。</p>';
       el.progress.hidden = true;
     } else {
       renderNext();
