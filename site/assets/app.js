@@ -30,6 +30,9 @@
   let rendered = 0;
   let observer = null;
   let castReady = false;
+  let bound = false;
+  let ready = false;
+  let totalCount = 0;
 
   const el = {
     panel: document.querySelector('.anime-panel'),
@@ -115,15 +118,34 @@
 
     try {
       setStatus('正在读取数据…');
+
+      // 第一步：先拿 600 条「头部数据」（约 12 KB gzip），秒开首屏
+      const head = await loadHedged('head.json', { firstTimeout: 8000, hedgeDelay: 1200, hedgeTimeout: 8000 }).catch(
+        () => null
+      );
+      if (head && head.items && head.items.length) {
+        hydrate(head);
+        totalCount = head.count || head.items.length;
+        ready = head.items.length >= totalCount;
+        bindOnce();
+        observe();
+        setFiltersEnabled(ready);
+        update(false);
+      }
+
+      // 第二步：全量数据（约 0.64 MB gzip），到货后替换并启用筛选
       const core = await loadHedged('data.json');
       hints.forEach(clearTimeout);
 
       hydrate(core);
-      bindEvents();
+      totalCount = (core.items || []).length;
+      ready = true;
+      bindOnce();
       observe();
+      setFiltersEnabled(true);
       update(false);
 
-      // 声优 / 制作公司晚一步到，不挡首屏
+      // 声优 / 制作公司再晚一步
       loadHedged('cast.json', { hedgeDelay: 1200 })
         .then(applyCast)
         .catch(() => {});
@@ -131,6 +153,19 @@
       hints.forEach(clearTimeout);
       showError(error);
     }
+  }
+
+  function bindOnce() {
+    if (bound) return;
+    bound = true;
+    bindEvents();
+  }
+
+  function setFiltersEnabled(on) {
+    [el.year, el.score, el.len, el.firstInput, el.nsfw].forEach((node) => {
+      node.disabled = !on;
+    });
+    el.panel.classList.toggle('is-busy', !on);
   }
 
   function showError(error) {
@@ -258,6 +293,12 @@
       return;
     }
     el.progress.hidden = false;
+
+    if (!ready) {
+      el.progress.textContent = '正在载入全部数据…（先显示前 ' + fmt(total) + ' 部）';
+      return;
+    }
+
     const waiting = !castReady && state.q.trim() ? ' · 声优/公司数据还在加载，稍后自动补上' : '';
     el.progress.textContent =
       (rendered >= total ? `已显示全部 ${fmt(total)} 部` : `已显示 ${fmt(rendered)} / ${fmt(total)} 部，继续下滑自动加载`) +
@@ -276,6 +317,10 @@
   }
 
   function observe() {
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
     if (!('IntersectionObserver' in window)) {
       window.addEventListener('scroll', () => {
         if (window.innerHeight + window.scrollY > document.body.offsetHeight - 600) renderNext();
@@ -305,6 +350,13 @@
   }
 
   function renderCount() {
+    if (!ready) {
+      el.count.innerHTML = `正在载入全部数据…（已显示前 <b>${fmt(rows.length)}</b> 部 / 共 ${fmt(
+        totalCount
+      )} 部）`;
+      el.filterCount.hidden = true;
+      return;
+    }
     const active = activeFilterCount();
     el.count.innerHTML =
       `共 <b>${fmt(rows.length)}</b> 部 · 当前 <b>${fmt(filtered.length)}</b> 部` +

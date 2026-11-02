@@ -32,6 +32,7 @@ PERSON_CHARS = r"G:\AnimenData\person-characters.jsonlines"
 PERSONS = r"G:\AnimenData\person.jsonlines"
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "data.json")
 CAST_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "cast.json")
+HEAD_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "head.json")
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 PLATFORMS = [("TV", {1}), ("OVA", {2}), ("剧场版", {3}), ("WEB", {5}), ("其他", {0, 2006})]
@@ -402,12 +403,15 @@ def main() -> int:
         "items": core_items,
     }
     cast_payload = {"v": DATA_VERSION, "studios": studios, "people": people, "items": cast_items}
+    head_payload = {"v": DATA_VERSION, "count": len(core_items), "items": core_items[:600]}
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
     with open(CAST_OUT, "w", encoding="utf-8") as fh:
         json.dump(cast_payload, fh, ensure_ascii=False, separators=(",", ":"))
+    with open(HEAD_OUT, "w", encoding="utf-8") as fh:
+        json.dump(head_payload, fh, ensure_ascii=False, separators=(",", ":"))
 
     size = os.path.getsize(OUT)
     cast_size = os.path.getsize(CAST_OUT)
