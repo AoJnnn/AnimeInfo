@@ -140,11 +140,6 @@
   border-color: var(--blue);
 }
 
-/* 全量数据还没到时，筛选先禁用，避免给出半套结果 */
-.anime-panel.is-busy .anime-filters {
-  opacity: 0.45;
-}
-
 .anime-num:disabled,
 #anime-nsfw:disabled {
   cursor: not-allowed;

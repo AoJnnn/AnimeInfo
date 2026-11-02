@@ -176,10 +176,10 @@
   }
 
   function setFiltersEnabled(on) {
+    // 全量没到也允许筛选，只是结果只覆盖已加载的部分，计数行会写明
     [el.year, el.score, el.len, el.firstInput, el.nsfw].forEach((node) => {
-      node.disabled = !on;
+      node.disabled = false;
     });
-    el.panel.classList.toggle('is-busy', !on);
   }
 
   function showError(error) {
@@ -365,10 +365,11 @@
 
   function renderCount() {
     if (!ready) {
-      el.count.innerHTML = `正在载入全部数据…（已显示前 <b>${fmt(rows.length)}</b> 部 / 共 ${fmt(
-        totalCount
-      )} 部）`;
-      el.filterCount.hidden = true;
+      el.count.innerHTML =
+        `已加载 <b>${fmt(rows.length)}</b> / ${fmt(totalCount)} 部 · 当前 <b>${fmt(filtered.length)}</b> 部` +
+        '（全量数据到达后自动更新）';
+      el.filterCount.hidden = activeFilterCount() === 0;
+      el.filterCount.textContent = activeFilterCount() ? String(activeFilterCount()) : '';
       return;
     }
     const active = activeFilterCount();
