@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="按播出年份、评分、番名长度和首字筛选 Bangumi 收录的动画条目。" />
+    <meta name="description" content="按播出年份、评分、番名长度和首字筛选 Bangumi 收录的动画条目，也可以搜番名、声优和制作公司。" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>番剧 · AoJnnn / OurNotes</title>
     <link rel="stylesheet" href="./assets/base.css" />
@@ -14,10 +14,10 @@
       <header class="site-header">
         <a class="brand" href="./">AOJNNN / ANIME <span>番剧索引</span></a>
         <nav>
-          <a class="active" href="./">番剧</a>
           <a href="https://aojnnn.github.io/#/archive">文章</a>
           <a href="https://aojnnn.github.io/#/music">音乐</a>
           <a href="https://aojnnn.github.io/#/tools">工具</a>
+          <a class="active" href="./">番剧</a>
           <a href="https://aojnnn.github.io/#/guestbook">留言</a>
           <a href="https://aojnnn.github.io/#/updates">动态</a>
         </nav>
@@ -28,7 +28,7 @@
         <section class="page-intro">
           <span class="eyebrow">ANIME INDEX</span>
           <h1>番剧</h1>
-          <p>按播出年份、评分、番名长度和首字，翻一翻 Bangumi 上收录的动画。</p>
+          <p>按播出年份、评分、番名长度和首字翻动画，也可以直接搜番名、声优或制作公司。</p>
         </section>
 
         <section class="anime-panel" aria-label="筛选条件">
@@ -38,10 +38,10 @@
               <input
                 id="anime-q"
                 type="search"
-                placeholder="搜索番名，中英文都行"
+                placeholder="搜番名 / 声优 / 制作公司"
                 autocomplete="off"
                 spellcheck="false"
-                aria-label="搜索番名"
+                aria-label="搜索番名、声优或制作公司"
               />
             </label>
             <div class="anime-sort" role="group" aria-label="排序方式">
@@ -51,56 +51,82 @@
               <button class="chip" type="button" data-sort="year" aria-pressed="false">年份</button>
               <button class="chip" type="button" data-sort="len" aria-pressed="false">片名长度</button>
             </div>
+            <select class="anime-sort-select" id="sort-select" aria-label="排序方式">
+              <option value="rank">按排名</option>
+              <option value="score">按评分</option>
+              <option value="year">按年份</option>
+              <option value="len">按片名长度</option>
+            </select>
             <button class="chip" id="anime-nsfw" type="button" aria-pressed="false" title="默认隐藏 R18 条目">含 R18</button>
           </div>
 
-          <div class="filter-group">
-            <span class="filter-label" id="year-label">播出年份</span>
-            <div class="filter-body">
-              <select class="anime-select" id="year-from" aria-labelledby="year-label"></select>
-              <span class="filter-dash" aria-hidden="true">—</span>
-              <select class="anime-select" id="year-to" aria-labelledby="year-label"></select>
-              <span class="filter-hint" id="year-hint">不选则不限</span>
-            </div>
-          </div>
+          <button
+            class="anime-filter-toggle"
+            id="anime-filter-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="anime-filters"
+          >
+            筛选条件 <span class="anime-filter-count" id="anime-filter-count" hidden></span>
+            <span class="icon" aria-hidden="true">▾</span>
+          </button>
 
-          <div class="filter-group">
-            <span class="filter-label">评分</span>
-            <div class="filter-body" id="score-chips">
-              <button class="chip is-on" type="button" data-score="0" aria-pressed="true">全部</button>
-              <button class="chip" type="button" data-score="7" aria-pressed="false">≥ 7.0</button>
-              <button class="chip" type="button" data-score="7.5" aria-pressed="false">≥ 7.5</button>
-              <button class="chip" type="button" data-score="8" aria-pressed="false">≥ 8.0</button>
-              <button class="chip" type="button" data-score="8.5" aria-pressed="false">≥ 8.5</button>
-              <button class="chip" type="button" data-score="9" aria-pressed="false">≥ 9.0</button>
+          <div class="anime-filters" id="anime-filters">
+            <div class="filter-group">
+              <span class="filter-label">播出年份</span>
+              <div class="filter-body">
+                <input class="anime-num" id="year-from" type="number" inputmode="numeric" min="1900" max="2030" placeholder="起始年" aria-label="起始年份" />
+                <span class="filter-dash" aria-hidden="true">—</span>
+                <input class="anime-num" id="year-to" type="number" inputmode="numeric" min="1900" max="2030" placeholder="结束年" aria-label="结束年份" />
+              </div>
             </div>
-          </div>
 
-          <div class="filter-group">
-            <span class="filter-label">番名长度</span>
-            <div class="filter-body" id="len-chips">
-              <button class="chip is-on" type="button" data-len="0" aria-pressed="true">全部</button>
-              <button class="chip" type="button" data-len="1" aria-pressed="false">1–4 字</button>
-              <button class="chip" type="button" data-len="2" aria-pressed="false">5–8 字</button>
-              <button class="chip" type="button" data-len="3" aria-pressed="false">9–12 字</button>
-              <button class="chip" type="button" data-len="4" aria-pressed="false">13 字以上</button>
+            <div class="filter-group">
+              <span class="filter-label">评分</span>
+              <div class="filter-body" id="score-chips">
+                <button class="chip is-on" type="button" data-score="0" aria-pressed="true">全部</button>
+                <button class="chip" type="button" data-score="7" aria-pressed="false">≥ 7.0</button>
+                <button class="chip" type="button" data-score="7.5" aria-pressed="false">≥ 7.5</button>
+                <button class="chip" type="button" data-score="8" aria-pressed="false">≥ 8.0</button>
+                <button class="chip" type="button" data-score="8.5" aria-pressed="false">≥ 8.5</button>
+                <button class="chip" type="button" data-score="9" aria-pressed="false">≥ 9.0</button>
+                <span class="filter-nums">
+                  <input class="anime-num" id="score-min" type="number" inputmode="decimal" min="0" max="10" step="0.1" placeholder="最低分" aria-label="最低评分" />
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div class="filter-group">
-            <span class="filter-label">首字</span>
-            <div class="filter-body" id="first-chips">
-              <button class="chip is-on" type="button" data-first="" aria-pressed="true">全部</button>
-              <input
-                class="anime-input-char"
-                id="first-input"
-                type="text"
-                maxlength="1"
-                placeholder="输入首字"
-                aria-label="按番名首字筛选"
-                autocomplete="off"
-                spellcheck="false"
-              />
+            <div class="filter-group">
+              <span class="filter-label">番名长度</span>
+              <div class="filter-body" id="len-chips">
+                <button class="chip is-on" type="button" data-len="0" aria-pressed="true">全部</button>
+                <button class="chip" type="button" data-len="1" aria-pressed="false">1–4 字</button>
+                <button class="chip" type="button" data-len="2" aria-pressed="false">5–8 字</button>
+                <button class="chip" type="button" data-len="3" aria-pressed="false">9–12 字</button>
+                <button class="chip" type="button" data-len="4" aria-pressed="false">13 字以上</button>
+                <span class="filter-nums">
+                  <input class="anime-num" id="len-min" type="number" inputmode="numeric" min="1" max="60" placeholder="最短" aria-label="番名最短字数" />
+                  <span class="filter-dash" aria-hidden="true">—</span>
+                  <input class="anime-num" id="len-max" type="number" inputmode="numeric" min="1" max="60" placeholder="最长" aria-label="番名最长字数" />
+                </span>
+              </div>
+            </div>
+
+            <div class="filter-group">
+              <span class="filter-label">首字</span>
+              <div class="filter-body">
+                <input
+                  class="anime-num anime-num-char"
+                  id="first-input"
+                  type="text"
+                  maxlength="1"
+                  placeholder="输入首字"
+                  aria-label="按番名首字筛选"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <span class="filter-hint">如：进、我、无</span>
+              </div>
             </div>
           </div>
         </section>
@@ -118,7 +144,8 @@
           <p>
             数据来自
             <a class="text-link" href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi</a>
-            的动画条目快照，共 26,360 部。排名为站内评分排名，横线表示暂无排名；评分为 10 分制，暂无评分的条目在按评分排序时排在最后。
+            的动画条目快照，共 26,360 部。排名为站内评分排名，横线表示暂无排名；评分为 10 分制。
+            搜索会同时匹配中文名、原名、声优和制作公司；命中声优或公司时，条目下方会标出命中的关键词。
             R18 条目默认隐藏，勾选「含 R18」后再筛选即可看到。
           </p>
         </section>

@@ -55,7 +55,7 @@
 }
 
 .anime-search input::placeholder,
-.anime-input-char::placeholder {
+.anime-num::placeholder {
   color: #a49d90;
 }
 
@@ -66,11 +66,38 @@
   gap: 6px;
 }
 
+.anime-sort-select {
+  display: none;
+  height: 34px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--line);
+  background-color: #faf8f2;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--ink);
+  font: 13px/1.4 var(--sans);
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+}
+
+.anime-sort-select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .filter-label {
   flex: none;
   color: var(--muted);
   font: 11px/1.8 var(--sans);
   letter-spacing: 0.14em;
+}
+
+.anime-filter-toggle {
+  display: none;
 }
 
 .filter-group {
@@ -105,41 +132,38 @@
   letter-spacing: 0.04em;
 }
 
-.anime-select {
-  appearance: none;
-  min-width: 100px;
-  padding: 7px 26px 7px 10px;
-  border: 1px solid var(--line);
-  background-color: #faf8f2;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
-  color: var(--ink);
-  font: 13px/1.4 var(--sans);
-  cursor: pointer;
+.filter-nums {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.anime-select:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
-}
-
-.anime-input-char {
-  width: 108px;
+.anime-num {
+  width: 96px;
   height: 31px;
-  padding: 0 10px;
+  padding: 0 9px;
   border: 1px solid var(--line);
   background: #faf8f2;
   color: var(--ink);
   font: 13px/1.2 var(--sans);
   outline: none;
+  appearance: textfield;
+  -moz-appearance: textfield;
   -webkit-tap-highlight-color: transparent;
 }
 
-.anime-input-char:focus {
+.anime-num::-webkit-outer-spin-button,
+.anime-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.anime-num:focus {
   border-color: var(--blue);
+}
+
+.anime-num-char {
+  width: 124px;
 }
 
 /* ---------- 结果 ---------- */
@@ -242,6 +266,19 @@
   white-space: nowrap;
 }
 
+.anime-hit {
+  margin: 5px 0 0;
+  color: var(--blue);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.anime-hit i {
+  margin: 0 6px;
+  color: var(--line);
+  font-style: normal;
+}
+
 .anime-meta {
   display: flex;
   flex-wrap: wrap;
@@ -330,11 +367,17 @@
 
 @media (max-width: 720px) {
   .anime-page {
-    padding-top: 55px;
+    padding: 46px 0 90px;
   }
 
+  /* 手机端：整条工具栏收紧，筛选条件收进折叠面板 */
   .anime-panel {
-    padding: 16px 16px 4px;
+    padding: 12px 14px 4px;
+  }
+
+  .anime-toolbar {
+    gap: 10px;
+    padding-bottom: 12px;
   }
 
   .anime-search {
@@ -342,27 +385,119 @@
     height: 42px;
   }
 
+  .anime-search input,
+  .anime-num {
+    font-size: 16px;
+  }
+
   .anime-sort {
+    display: none;
+  }
+
+  .anime-sort-select {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  #anime-nsfw {
+    flex: none;
+  }
+
+  .anime-filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     width: 100%;
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    background: #faf8f2;
+    color: var(--ink);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .anime-filter-toggle .icon {
+    margin-left: auto;
+    color: var(--muted);
+    transition: transform 0.2s;
+  }
+
+  .anime-panel.is-open .anime-filter-toggle .icon {
+    transform: rotate(180deg);
+  }
+
+  .anime-filter-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--red);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .anime-filter-count[hidden] {
+    display: none;
+  }
+
+  .anime-panel:not(.is-open) .anime-filters {
+    display: none;
   }
 
   .filter-group {
     grid-template-columns: 1fr;
     gap: 8px;
-    padding: 12px 0;
+    padding: 11px 0;
   }
 
   .filter-group > .filter-label {
     padding-top: 0;
   }
 
-  .anime-select,
-  .anime-input-char {
-    font-size: 16px;
+  .filter-body {
+    gap: 6px;
   }
 
-  .anime-input-char {
-    height: 36px;
+  /* 手机端把成组的 chip 排成三列网格，输入框独占一行 */
+  #score-chips,
+  #len-chips {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #score-chips .chip,
+  #len-chips .chip {
+    display: grid;
+    place-items: center;
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+
+  #score-chips .filter-nums,
+  #len-chips .filter-nums {
+    grid-column: 1 / -1;
+  }
+
+  .filter-nums {
+    flex: 1 1 100%;
+  }
+
+  .anime-num {
+    height: 38px;
+  }
+
+  .anime-num-char {
+    width: 132px;
   }
 
   .anime-row {
@@ -397,7 +532,12 @@
     font-size: 17px;
   }
 
+  .anime-hit {
+    font-size: 11px;
+  }
+
   .anime-note {
-    margin-top: 48px;
+    margin-top: 44px;
+    padding-top: 28px;
   }
 }

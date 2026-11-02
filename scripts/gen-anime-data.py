@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
-"""从 G:/AnimenData 的两个数据源生成站点的 data.json
+"""从 G:/AnimenData 生成站点数据 site/data.json
 
-输入
-----
-G:/AnimenData/output.xlsx   Bangumi 动画导出（26420 行）
-G:/AnimenData/subject.json  条目详情（JSON Lines，717MB，用来补全缺失的番名）
+数据源
+------
+output.xlsx                     主表（26,420 行）
+subject.json                    补番名、取「动画制作 / 制作」
+person-characters.jsonlines     subject → 声优（cv）关系
+person.jsonlines                声优姓名（含中文名）
 
 输出
 ----
-site/data.json  紧凑数组格式：[[id, 中文名, 原名, 年份, 评分, 排名, 平台码, nsfw], ...]
+{
+  "meta": {...},
+  "studios": ["", "MAPPA", ...],
+  "people":  ["", "水树奈奈|水樹奈々", ...],
+  "items":   [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 制作公司索引, [声优索引...]], ...]
+}
 
-用法
-----
-python scripts/gen-anime-data.py
+用法：python scripts/gen-anime-data.py
 """
 
 from __future__ import annotations
@@ -27,13 +32,14 @@ from xml.etree import ElementTree as ET
 
 XLSX = r"G:\AnimenData\output.xlsx"
 SUBJECT = r"G:\AnimenData\subject.json"
+PERSON_CHARS = r"G:\AnimenData\person-characters.jsonlines"
+PERSONS = r"G:\AnimenData\person.jsonlines"
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "data.json")
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-
-# Bangumi 平台码 → 站点分类
 PLATFORMS = [("TV", {1}), ("OVA", {2}), ("剧场版", {3}), ("WEB", {5}), ("其他", {0, 2006})]
 PLATFORM_INDEX = {code: i for i, (_, codes) in enumerate(PLATFORMS) for code in codes}
+MAX_CV = 12  # 每部最多保留 12 位声优，控制体积
 
 
 def read_xlsx(path: str) -> list[dict[str, str]]:
@@ -63,9 +69,126 @@ def read_xlsx(path: str) -> list[dict[str, str]]:
     return rows[1:]  # 去掉表头
 
 
-def load_subject_names(path: str, wanted: set[int]) -> dict[int, tuple[str, str]]:
-    """流式读取 JSON Lines，只保留 wanted 里的 id → (name, name_cn)。"""
-    found: dict[int, tuple[str, str]] = {}
+def studio_from_infobox(text: str) -> str:
+    """只取「动画制作」这个干净字段；「製作 / 制作 / 制作公司」是制作委员会，留给后续按词表匹配。"""
+    for key in ("动画制作",):
+        m = re.search(r"\|\s*" + key + r"\s*=\s*([^\r\n|]+)", text or "")
+        if m:
+            value = re.sub(r"\[\[|\]\]", "", m.group(1)).strip()
+            value = re.sub(r"\s+", " ", value)
+            if value:
+                return value
+    return ""
+
+
+def committee_text(text: str) -> str:
+    """「製作 / 制作 / 制作公司」原文，用来从制作委员会里捞出动画公司。"""
+    for key in ("製作", "制作公司", "制作"):
+        m = re.search(r"\|\s*" + key + r"\s*=\s*([^\r\n|]+)", text or "")
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+# 常见别名 → 统一名，用于剧组表 / 标签匹配
+STUDIO_ALIASES = {
+    "sunrise": "SUNRISE",
+    "サンライズ": "SUNRISE",
+    "日本サンライズ": "SUNRISE",
+    "bones": "BONES",
+    "ボンズ": "BONES",
+    "mapaa": "MAPPA",
+    "マッパ": "MAPPA",
+    "ufotable": "ufotable",
+    "ユーフォーテーブル": "ufotable",
+    "shaft": "SHAFT",
+    "シャフト": "SHAFT",
+    "gainax": "GAINAX",
+    "ガイナックス": "GAINAX",
+    "trigger": "TRIGGER",
+    "トリガー": "TRIGGER",
+    "京都アニメーション": "京都アニメーション",
+    "kyoto animation": "京都アニメーション",
+    "kyoani": "京都アニメーション",
+    "京阿尼": "京都アニメーション",
+    "production i.g": "Production I.G",
+    "プロダクション・アイジー": "Production I.G",
+    "igi": "Production I.G",
+    "madhouse": "MADHOUSE",
+    "マッドハウス": "MADHOUSE",
+    "j.c.staff": "J.C.STAFF",
+    "ジェー・シー・スタッフ": "J.C.STAFF",
+    "a-1 pictures": "A-1 Pictures",
+    "エー・ワン・ピクチャーズ": "A-1 Pictures",
+    "東映アニメーション": "東映アニメーション",
+    "toei animation": "東映アニメーション",
+    "スタジオジブリ": "スタジオジブリ",
+    "ghibli": "スタジオジブリ",
+    "ジブリ": "スタジオジブリ",
+    "production ig": "Production I.G",
+    "pierrot": "ぴえろ",
+    "ぴえろ": "ぴえろ",
+    "silver link": "SILVER LINK.",
+    "silver link.": "SILVER LINK.",
+    "tms": "トムス・エンタテインメント",
+    "トムス・エンタテインメント": "トムス・エンタテインメント",
+    "satelight": "サテライト",
+    "サテライト": "サテライト",
+    "doga kobo": "動画工房",
+    "動画工房": "動画工房",
+    "white fox": "WHITE FOX",
+    "ホワイトフォックス": "WHITE FOX",
+    "cloverworks": "CloverWorks",
+    "クローバーワークス": "CloverWorks",
+    "wit studio": "WIT STUDIO",
+    "ウィットスタジオ": "WIT STUDIO",
+    "studio bind": "スタジオバインド",
+    "スタジオバインド": "スタジオバインド",
+}
+
+
+def canonical_studio(name: str) -> str:
+    return STUDIO_ALIASES.get(name.strip().lower(), name.strip())
+
+
+def tidy_studio(name: str) -> str:
+    """「A→B / C」这类多公司长串只留第一家，过长的截断。"""
+    value = re.sub(r"\s+", " ", name or "").strip()
+    value = re.split(r"\s*(?:→|/|、|;|；)\s*", value)[0].strip()
+    return value[:40]
+
+
+def match_known_studio(text: str, vocab: list[str], vocab_map: dict[str, str]) -> str:
+    """在制作委员会文本里找已知动画公司（长名优先，避免误匹配）。"""
+    if not text:
+        return ""
+    lowered = text.lower()
+    for name in vocab:
+        if len(name) < 4:
+            continue
+        if name.lower() in lowered:
+            return vocab_map.get(name, name)
+    return ""
+
+
+def studio_from_tags(tags: str, vocab_map: dict[str, str], vocab_set: set[str]) -> str:
+    """标签里常直接带公司名（SUNRISE / 京阿尼 / ufotable…）。"""
+    for raw in (tags or "").split(","):
+        name = raw.strip()
+        if not name:
+            continue
+        canon = canonical_studio(name)
+        if canon in vocab_set:
+            return canon
+        found = vocab_map.get(canon.lower())
+        if found:
+            return found
+    return ""
+
+
+def load_subjects(path: str, wanted: set[int]) -> dict[int, tuple[str, str, str, str]]:
+    """id → (name, name_cn, 动画制作, 製作原文)"""
+    found = {}
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             m = re.match(r'\{"id":(\d+)', line)
@@ -74,14 +197,58 @@ def load_subject_names(path: str, wanted: set[int]) -> dict[int, tuple[str, str]
             sid = int(m.group(1))
             if sid not in wanted:
                 continue
+            obj = json.loads(line)
+            box = obj.get("infobox") or ""
+            found[sid] = (
+                (obj.get("name") or "").strip(),
+                (obj.get("name_cn") or "").strip(),
+                studio_from_infobox(box),
+                committee_text(box),
+            )
+    return found
+
+
+def load_cv_links(path: str, wanted: set[int]) -> dict[int, list[int]]:
+    """subject_id → [person_id...]（按角色出场顺序近似保留）"""
+    links: dict[int, list[int]] = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            found[sid] = ((obj.get("name") or "").strip(), (obj.get("name_cn") or "").strip())
-            if len(found) >= len(wanted):
-                break
-    return found
+            sid = obj.get("subject_id")
+            pid = obj.get("person_id")
+            if sid in wanted and isinstance(pid, int):
+                bucket = links.setdefault(sid, [])
+                if pid not in bucket:
+                    bucket.append(pid)
+    return links
+
+
+def load_person_names(path: str, needed: set[int]) -> dict[int, str]:
+    """person_id → "中文名|日文名"（两个都有且不同才拼接）"""
+    names = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            m = re.match(r'\{"id":(\d+)', line)
+            if not m:
+                continue
+            pid = int(m.group(1))
+            if pid not in needed:
+                continue
+            obj = json.loads(line)
+            jp = (obj.get("name") or "").strip()
+            box = obj.get("infobox") or ""
+            cn = ""
+            mm = re.search(r"\|\s*简体中文名\s*=\s*([^\r\n|]+)", box)
+            if mm:
+                cn = mm.group(1).strip()
+            if cn and jp and cn != jp:
+                names[pid] = f"{cn}|{jp}"
+            else:
+                names[pid] = cn or jp
+    return names
 
 
 def normalize_year(date_value: str, short_year: str) -> int:
@@ -104,12 +271,34 @@ def main() -> int:
     print(f"xlsx 数据行: {len(raw)}")
 
     wanted = {int(r["C"]) for r in raw if (r.get("C") or "").strip().isdigit()}
-    print(f"需要补名的 id: {len(wanted)}")
+    print(f"目标 id: {len(wanted)}")
 
-    names = {}
-    if os.path.exists(SUBJECT):
-        names = load_subject_names(SUBJECT, wanted)
-        print(f"subject.json 命中: {len(names)}/{len(wanted)}")
+    subjects = load_subjects(SUBJECT, wanted) if os.path.exists(SUBJECT) else {}
+    print(f"subject.json 命中: {len(subjects)}")
+
+    cv_links = load_cv_links(PERSON_CHARS, wanted) if os.path.exists(PERSON_CHARS) else {}
+    needed_people = {pid for pids in cv_links.values() for pid in pids}
+    print(f"有 CV 的条目: {len(cv_links)} | 声优人数: {len(needed_people)}")
+
+    people_names = load_person_names(PERSONS, needed_people) if os.path.exists(PERSONS) else {}
+    print(f"声优姓名命中: {len(people_names)}")
+
+    studio_index: dict[str, int] = {"": 0}
+    studios: list[str] = [""]
+    person_index: dict[str, int] = {}
+    people: list[str] = [""]
+
+    # 用「动画制作」字段建立词表，供后面从制作委员会 / 标签里捞公司
+    vocab_map: dict[str, str] = {}
+    for _, _, clean, _ in subjects.values():
+        if clean:
+            tidy = tidy_studio(clean)
+            canon = canonical_studio(tidy)
+            vocab_map.setdefault(tidy.lower(), canon)
+            vocab_map.setdefault(canon.lower(), canon)
+    vocab_list = sorted(vocab_map, key=len, reverse=True)
+    vocab_set = set(vocab_map.values())
+    print(f"制作公司词表: {len(vocab_set)} 个")
 
     items = []
     stats = collections.Counter()
@@ -119,7 +308,7 @@ def main() -> int:
             stats["skip_no_id"] += 1
             continue
         sid = int(sid_raw)
-        jp, cn = names.get(sid, ("", ""))
+        jp, cn, clean_studio, committee = subjects.get(sid, ("", "", "", ""))
 
         display = (r.get("D") or "").strip() or cn or jp
         if not display:
@@ -138,10 +327,6 @@ def main() -> int:
             score = round(float(r.get("I") or 0), 2)
         except ValueError:
             score = 0.0
-        try:
-            rank = int(float(r.get("H") or 0))
-        except ValueError:
-            rank = 0
         if score <= 0 or score > 10:
             score = 0.0
         if score == 0:
@@ -149,21 +334,51 @@ def main() -> int:
 
         plat_raw = (r.get("G") or "").strip()
         plat = PLATFORM_INDEX.get(int(plat_raw) if plat_raw.isdigit() else -1, 4)
-
         nsfw = 1 if (r.get("M") or "").strip() == "是" else 0
+
+        studio = canonical_studio(tidy_studio(clean_studio)) if clean_studio else ""
+        if not studio:
+            studio = match_known_studio(committee, vocab_list, vocab_map)
+            if studio:
+                stats["studio_from_committee"] += 1
+        if not studio:
+            studio = studio_from_tags(r.get("K") or "", vocab_map, vocab_set)
+            if studio:
+                stats["studio_from_tags"] += 1
+
+        studio_id = 0
+        if studio:
+            studio_id = studio_index.get(studio)
+            if studio_id is None:
+                studio_id = len(studios)
+                studio_index[studio] = studio_id
+                studios.append(studio)
+
+        cvs = []
+        for pid in cv_links.get(sid, [])[:MAX_CV]:
+            name = people_names.get(pid)
+            if not name:
+                continue
+            index = person_index.get(name)
+            if index is None:
+                index = len(people)
+                person_index[name] = index
+                people.append(name)
+            cvs.append(index)
 
         items.append([
             sid,
             display,
             original,
             year,
-            int(round(score * 10)),   # 评分 × 10 存整数，前端 /10
-            rank,
+            int(round(score * 10)),
+            int(float(r.get("H") or 0) or 0),
             plat,
             nsfw,
+            studio_id,
+            cvs,
         ])
 
-    # 默认顺序：有排名在前（排名升序），其余按评分降序、年份降序
     items.sort(key=lambda it: (it[5] == 0, it[5] if it[5] else 0, -it[4], -it[3]))
 
     payload = {
@@ -173,6 +388,8 @@ def main() -> int:
             "updated": "2026-08",
             "source": "Bangumi (bgm.tv)",
         },
+        "studios": studios,
+        "people": people,
         "items": items,
     }
 
@@ -183,9 +400,10 @@ def main() -> int:
     size = os.path.getsize(OUT)
     years = [it[3] for it in items if it[3]]
     print(f"写出 {OUT}: {size / 1024 / 1024:.2f} MB, {len(items)} 条")
+    print(f"制作公司: {len(studios) - 1} 家 | 声优: {len(people) - 1} 人 | 有 CV 的条目: {sum(1 for it in items if it[9])}")
+    print(f"公司来源: 动画制作 {stats['studio_from_committee'] + 0} 之外，委员会补 {stats['studio_from_committee']}，标签补 {stats['studio_from_tags']}")
     print(f"年份范围: {min(years)}–{max(years)} | 无年份: {stats['no_year']} | 无评分: {stats['no_score']}")
     print(f"补名: {stats['name_from_subject']} | 占位名: {stats['placeholder_name']} | 跳过: {stats['skip_no_id']}")
-    print("平台分布:", collections.Counter(it[6] for it in items))
     return 0
 
 
