@@ -132,12 +132,6 @@
   letter-spacing: 0.04em;
 }
 
-.filter-nums {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .anime-num {
   width: 96px;
   height: 31px;
@@ -465,27 +459,6 @@
 
   .filter-body {
     gap: 6px;
-  }
-
-  /* 手机端把成组的 chip 排成三列网格，输入框独占一行 */
-  #score-chips,
-  #len-chips {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-  }
-
-  #score-chips .chip,
-  #len-chips .chip {
-    display: grid;
-    place-items: center;
-    padding: 8px 4px;
-    font-size: 12px;
-  }
-
-  #score-chips .filter-nums,
-  #len-chips .filter-nums {
-    grid-column: 1 / -1;
   }
 
   .filter-nums {

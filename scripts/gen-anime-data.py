@@ -8,14 +8,10 @@ subject.json                    补番名、取「动画制作 / 制作」
 person-characters.jsonlines     subject → 声优（cv）关系
 person.jsonlines                声优姓名（含中文名）
 
-输出
+输出（拆成两份，首屏只等第一份）
 ----
-{
-  "meta": {...},
-  "studios": ["", "MAPPA", ...],
-  "people":  ["", "水树奈奈|水樹奈々", ...],
-  "items":   [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 制作公司索引, [声优索引...]], ...]
-}
+site/data.json   { meta, items: [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 名字长度, 首字], ...] }
+site/cast.json   { studios: [...], people: [...], items: [[id, 公司索引, [声优索引...]], ...] }
 
 用法：python scripts/gen-anime-data.py
 """
@@ -35,11 +31,13 @@ SUBJECT = r"G:\AnimenData\subject.json"
 PERSON_CHARS = r"G:\AnimenData\person-characters.jsonlines"
 PERSONS = r"G:\AnimenData\person.jsonlines"
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "data.json")
+CAST_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "cast.json")
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 PLATFORMS = [("TV", {1}), ("OVA", {2}), ("剧场版", {3}), ("WEB", {5}), ("其他", {0, 2006})]
 PLATFORM_INDEX = {code: i for i, (_, codes) in enumerate(PLATFORMS) for code in codes}
 MAX_CV = 12  # 每部最多保留 12 位声优，控制体积
+DATA_VERSION = 2  # 前端会校验；改结构时同步改 site/assets/app.js
 
 
 def read_xlsx(path: str) -> list[dict[str, str]]:
@@ -381,25 +379,41 @@ def main() -> int:
 
     items.sort(key=lambda it: (it[5] == 0, it[5] if it[5] else 0, -it[4], -it[3]))
 
+    # 主数据：筛选/列表必须的字段，外加预计算的名字长度与首字（省掉前端逐条处理）
+    core_items = []
+    cast_items = []
+    for sid, name, original, year, score10, rank, plat, nsfw, studio_id, cvs in items:
+        chars = list(name)
+        first = chars[0] if chars else ""
+        if "a" <= first <= "z":
+            first = first.upper()
+        core_items.append([sid, name, original, year, score10, rank, plat, nsfw, len(chars), first])
+        if studio_id or cvs:
+            cast_items.append([sid, studio_id, cvs])
+
     payload = {
+        "v": DATA_VERSION,
         "meta": {
             "count": len(items),
             "platforms": [name for name, _ in PLATFORMS],
             "updated": "2026-08",
             "source": "Bangumi (bgm.tv)",
         },
-        "studios": studios,
-        "people": people,
-        "items": items,
+        "items": core_items,
     }
+    cast_payload = {"v": DATA_VERSION, "studios": studios, "people": people, "items": cast_items}
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
+    with open(CAST_OUT, "w", encoding="utf-8") as fh:
+        json.dump(cast_payload, fh, ensure_ascii=False, separators=(",", ":"))
 
     size = os.path.getsize(OUT)
-    years = [it[3] for it in items if it[3]]
-    print(f"写出 {OUT}: {size / 1024 / 1024:.2f} MB, {len(items)} 条")
+    cast_size = os.path.getsize(CAST_OUT)
+    years = [it[3] for it in core_items if it[3]]
+    print(f"写出 {OUT}: {size / 1024 / 1024:.2f} MB, {len(core_items)} 条")
+    print(f"写出 {CAST_OUT}: {cast_size / 1024 / 1024:.2f} MB, {len(cast_items)} 条有声优或公司")
     print(f"制作公司: {len(studios) - 1} 家 | 声优: {len(people) - 1} 人 | 有 CV 的条目: {sum(1 for it in items if it[9])}")
     print(f"公司来源: 动画制作 {stats['studio_from_committee'] + 0} 之外，委员会补 {stats['studio_from_committee']}，标签补 {stats['studio_from_tags']}")
     print(f"年份范围: {min(years)}–{max(years)} | 无年份: {stats['no_year']} | 无评分: {stats['no_score']}")

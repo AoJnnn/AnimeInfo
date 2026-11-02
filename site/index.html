@@ -6,6 +6,7 @@
     <meta name="description" content="按播出年份、评分、番名长度和首字筛选 Bangumi 收录的动画条目，也可以搜番名、声优和制作公司。" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>番剧 · AoJnnn / OurNotes</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="stylesheet" href="./assets/base.css" />
     <link rel="stylesheet" href="./assets/anime.css" />
   </head>
@@ -17,7 +18,6 @@
           <a href="https://aojnnn.github.io/#/archive">文章</a>
           <a href="https://aojnnn.github.io/#/music">音乐</a>
           <a href="https://aojnnn.github.io/#/tools">工具</a>
-          <a class="active" href="./">番剧</a>
           <a href="https://aojnnn.github.io/#/guestbook">留言</a>
           <a href="https://aojnnn.github.io/#/updates">动态</a>
         </nav>
@@ -75,40 +75,21 @@
             <div class="filter-group">
               <span class="filter-label">播出年份</span>
               <div class="filter-body">
-                <input class="anime-num" id="year-from" type="number" inputmode="numeric" min="1900" max="2030" placeholder="起始年" aria-label="起始年份" />
-                <span class="filter-dash" aria-hidden="true">—</span>
-                <input class="anime-num" id="year-to" type="number" inputmode="numeric" min="1900" max="2030" placeholder="结束年" aria-label="结束年份" />
+                <input class="anime-num" id="year-input" type="number" inputmode="numeric" min="1900" max="2030" placeholder="如 2011" aria-label="播出年份" />
               </div>
             </div>
 
             <div class="filter-group">
               <span class="filter-label">评分</span>
-              <div class="filter-body" id="score-chips">
-                <button class="chip is-on" type="button" data-score="0" aria-pressed="true">全部</button>
-                <button class="chip" type="button" data-score="7" aria-pressed="false">≥ 7.0</button>
-                <button class="chip" type="button" data-score="7.5" aria-pressed="false">≥ 7.5</button>
-                <button class="chip" type="button" data-score="8" aria-pressed="false">≥ 8.0</button>
-                <button class="chip" type="button" data-score="8.5" aria-pressed="false">≥ 8.5</button>
-                <button class="chip" type="button" data-score="9" aria-pressed="false">≥ 9.0</button>
-                <span class="filter-nums">
-                  <input class="anime-num" id="score-min" type="number" inputmode="decimal" min="0" max="10" step="0.1" placeholder="最低分" aria-label="最低评分" />
-                </span>
+              <div class="filter-body">
+                <input class="anime-num" id="score-input" type="number" inputmode="decimal" min="0" max="10" step="0.1" placeholder="如 8.5" aria-label="评分" />
               </div>
             </div>
 
             <div class="filter-group">
               <span class="filter-label">番名长度</span>
-              <div class="filter-body" id="len-chips">
-                <button class="chip is-on" type="button" data-len="0" aria-pressed="true">全部</button>
-                <button class="chip" type="button" data-len="1" aria-pressed="false">1–4 字</button>
-                <button class="chip" type="button" data-len="2" aria-pressed="false">5–8 字</button>
-                <button class="chip" type="button" data-len="3" aria-pressed="false">9–12 字</button>
-                <button class="chip" type="button" data-len="4" aria-pressed="false">13 字以上</button>
-                <span class="filter-nums">
-                  <input class="anime-num" id="len-min" type="number" inputmode="numeric" min="1" max="60" placeholder="最短" aria-label="番名最短字数" />
-                  <span class="filter-dash" aria-hidden="true">—</span>
-                  <input class="anime-num" id="len-max" type="number" inputmode="numeric" min="1" max="60" placeholder="最长" aria-label="番名最长字数" />
-                </span>
+              <div class="filter-body">
+                <input class="anime-num" id="len-input" type="number" inputmode="numeric" min="1" max="60" placeholder="如 4" aria-label="番名字数" />
               </div>
             </div>
 

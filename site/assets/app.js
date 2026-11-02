@@ -1,36 +1,31 @@
 /* 番剧索引页逻辑
-   数据格式（site/data.json）：
-   {
-     meta: {...},
-     studios: ["", "MAPPA", ...],
-     people:  ["", "水树奈奈|水樹奈々", ...],
-     items:   [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 制作公司索引, [声优索引...]], ...]
-   } */
+   数据分两份：
+   data.json  { v, meta, items: [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 名字长度, 首字]] }
+   cast.json  { v, studios: [...], people: [...], items: [[id, 公司索引, [声优索引...]]] }  ← 首屏之后后台加载
+
+   线路：本地 Pages 与 jsDelivr 同时发车，谁先到用谁（国内 Pages 常卡住）。 */
 
 (() => {
   'use strict';
 
+  const DATA_VERSION = 2;
   const PAGE_SIZE = 60;
   const PLATFORMS = ['TV', 'OVA', '剧场版', 'WEB', '其他'];
-  const LEN_PRESETS = { 1: [1, 4], 2: [5, 8], 3: [9, 12], 4: [13, null] };
   const YEAR_MIN = 1900;
   const YEAR_MAX = 2030;
+  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@main/site';
 
   const state = {
     q: '',
-    yearFrom: null,
-    yearTo: null,
-    scoreMin: 0,
-    lenMin: null,
-    lenMax: null,
+    year: null,
+    score: null,
+    len: null,
     first: '',
     sort: 'rank',
     nsfw: false,
     shown: PAGE_SIZE,
   };
 
-  let STUDIOS = [''];
-  let PEOPLE = [''];
   let rows = [];
   let filtered = [];
 
@@ -45,13 +40,9 @@
     toggle: document.getElementById('anime-filter-toggle'),
     filters: document.getElementById('anime-filters'),
     filterCount: document.getElementById('anime-filter-count'),
-    yearFrom: document.getElementById('year-from'),
-    yearTo: document.getElementById('year-to'),
-    scoreMin: document.getElementById('score-min'),
-    lenMin: document.getElementById('len-min'),
-    lenMax: document.getElementById('len-max'),
-    scoreChips: document.getElementById('score-chips'),
-    lenChips: document.getElementById('len-chips'),
+    year: document.getElementById('year-input'),
+    score: document.getElementById('score-input'),
+    len: document.getElementById('len-input'),
     firstInput: document.getElementById('first-input'),
   };
 
@@ -71,32 +62,76 @@
     return String(value).trim() === '' || !Number.isFinite(n) ? null : n;
   };
 
-  /* ---------- 数据 ---------- */
+  /* ---------- 加载 ---------- */
 
-  async function boot() {
-    try {
-      const response = await fetch('./data.json', { cache: 'no-cache' });
+  function setStatus(text) {
+    el.count.textContent = text;
+  }
+
+  function fetchJSON(url, signal) {
+    return fetch(url, { signal }).then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json();
-      hydrate(payload);
-      bindEvents();
-      update(false);
-    } catch (error) {
-      el.count.textContent = '数据读取失败，请刷新页面重试。';
-      el.list.innerHTML = '<p class="anime-empty">没能加载 data.json。</p>';
-      console.error(error);
+      return response.json();
+    });
+  }
+
+  function checked(promise) {
+    return promise.then((payload) => {
+      if (!payload || payload.v !== DATA_VERSION) throw new Error('数据版本不匹配');
+      return payload;
+    });
+  }
+
+  // 两条线路并发，取先到的那份；慢的那条留足时间，别把「慢但能用」的线路掐死
+  async function loadRaced(name, timeouts = [30000, 12000]) {
+    const urls = [`./${name}`, `${CDN_BASE}/${name}?v=${DATA_VERSION}`];
+    const controllers = urls.map(() => new AbortController());
+    const timers = urls.map((_, i) => setTimeout(() => controllers[i].abort(), timeouts[i]));
+
+    try {
+      return await Promise.any(urls.map((url, i) => checked(fetchJSON(url, controllers[i].signal))));
+    } finally {
+      timers.forEach(clearTimeout);
+      controllers.forEach((controller) => controller.abort());
     }
   }
 
-  function hydrate(payload) {
-    STUDIOS = payload.studios && payload.studios.length ? payload.studios : [''];
-    PEOPLE = payload.people && payload.people.length ? payload.people : [''];
+  async function boot() {
+    const hints = [
+      setTimeout(() => setStatus('网络有点慢，正在加载…'), 3500),
+      setTimeout(() => setStatus('还在加载（约 1 MB），请再等一下…'), 8000),
+    ];
 
+    try {
+      setStatus('正在读取数据…');
+      const core = await loadRaced('data.json');
+      hints.forEach(clearTimeout);
+
+      hydrate(core);
+      bindEvents();
+      update(false);
+
+      // 声优 / 制作公司晚一步到，不挡首屏
+      loadRaced('cast.json', [10000, 14000])
+        .then(applyCast)
+        .catch(() => {});
+    } catch (error) {
+      hints.forEach(clearTimeout);
+      showError(error);
+    }
+  }
+
+  function showError(error) {
+    const detail = error && error.message ? error.message : '网络异常';
+    el.count.innerHTML = '数据加载失败 <button class="anime-reset" id="anime-retry" type="button">点此重试</button>';
+    el.list.innerHTML = `<p class="anime-empty">没能下载数据（${esc(detail)}）。换一下网络后再试试，或刷新页面。</p>`;
+    const retry = document.getElementById('anime-retry');
+    if (retry) retry.addEventListener('click', () => location.reload());
+  }
+
+  function hydrate(payload) {
     rows = (payload.items || []).map((item) => {
-      const [id, name, orig, year, scoreX10, rank, plat, nsfw, studioId, cvIds] = item;
-      const studio = STUDIOS[studioId] || '';
-      const cvs = (cvIds || []).map((index) => PEOPLE[index]).filter(Boolean);
-      const shortCvs = cvs.map((entry) => entry.split('|')[0]);
+      const [id, name, orig, year, scoreX10, rank, plat, nsfw, len, ch] = item;
       return {
         id,
         name,
@@ -106,59 +141,58 @@
         rank,
         plat,
         nsfw,
-        studio,
-        cvNames: shortCvs,
-        len: Array.from(name).length,
-        ch: firstChar(name),
-        hay: [name, orig, studio, ...cvs.map((entry) => entry.replace('|', ' '))].join(' ').toLowerCase(),
+        len,
+        ch,
+        studio: '',
+        cvNames: [],
+        hay: `${name} ${orig}`.toLowerCase(),
       };
     });
-
-    const years = rows.map((row) => row.year).filter((year) => year > 0);
-    if (years.length) {
-      // 输入框的合法范围提示用，不参与筛选
-      el.yearFrom.max = String(Math.max(...years));
-      el.yearTo.max = String(Math.max(...years));
-    }
   }
 
-  /* ---------- 筛选 ---------- */
+  function applyCast(payload) {
+    const studios = payload.studios || [''];
+    const people = payload.people || [''];
+    const index = new Map();
+    for (const [sid, studioId, cvIds] of payload.items || []) index.set(sid, [studioId, cvIds]);
 
-  const yearActive = () => state.yearFrom !== null || state.yearTo !== null;
+    for (const row of rows) {
+      const entry = index.get(row.id);
+      if (!entry) continue;
+      const [studioId, cvIds] = entry;
+      row.studio = studios[studioId] || '';
+      const cvFull = (cvIds || []).map((i) => people[i] || '');
+      row.cvNames = cvFull.map((name) => name.split('|')[0]).filter(Boolean);
+      row.hay = `${row.name} ${row.orig} ${row.studio} ${cvFull
+        .map((name) => name.replace('|', ' '))
+        .join(' ')}`.toLowerCase();
+    }
+
+    if (state.q.trim()) update(false);
+  }
+
+  /* ---------- 筛选（定值） ---------- */
 
   function applyFilters() {
     const query = state.q.trim().toLowerCase();
-    const hasYear = yearActive();
-    const hasLen = state.lenMin !== null || state.lenMax !== null;
 
     filtered = rows.filter((row) => {
       if (!state.nsfw && row.nsfw) return false;
-
-      if (hasYear) {
-        if (!row.year) return false;
-        if (state.yearFrom !== null && row.year < state.yearFrom) return false;
-        if (state.yearTo !== null && row.year > state.yearTo) return false;
-      }
-
-      if (state.scoreMin && row.score < state.scoreMin) return false;
-
-      if (hasLen) {
-        if (state.lenMin !== null && row.len < state.lenMin) return false;
-        if (state.lenMax !== null && row.len > state.lenMax) return false;
-      }
-
+      if (state.year !== null && row.year !== state.year) return false;
+      if (state.score !== null && Math.abs(row.score - state.score) > 0.001) return false;
+      if (state.len !== null && row.len !== state.len) return false;
       if (state.first && row.ch !== state.first) return false;
       if (query && !row.hay.includes(query)) return false;
       return true;
     });
 
-    filtered.sort(comparators[state.sort]);
+    // 数据文件已按排名排好，默认排序无需再排
+    if (state.sort !== 'rank') filtered.sort(comparators[state.sort]);
   }
 
   const unranked = (row) => (row.rank ? 0 : 1);
 
   const comparators = {
-    rank: (a, b) => unranked(a) - unranked(b) || a.rank - b.rank || b.score - a.score,
     score: (a, b) => b.score - a.score || unranked(a) - unranked(b) || a.rank - b.rank,
     year: (a, b) => b.year - a.year || unranked(a) - unranked(b) || a.rank - b.rank,
     len: (a, b) => b.len - a.len || unranked(a) - unranked(b) || a.rank - b.rank,
@@ -207,9 +241,9 @@
 
   function activeFilterCount() {
     let count = 0;
-    if (yearActive()) count += 1;
-    if (state.scoreMin) count += 1;
-    if (state.lenMin !== null || state.lenMax !== null) count += 1;
+    if (state.year !== null) count += 1;
+    if (state.score !== null) count += 1;
+    if (state.len !== null) count += 1;
     if (state.first) count += 1;
     if (state.nsfw) count += 1;
     return count;
@@ -236,32 +270,13 @@
     }
   }
 
-  /* ---------- 控件同步 ---------- */
+  /* ---------- 控件 ---------- */
 
   function syncInputs() {
-    el.yearFrom.value = state.yearFrom === null ? '' : String(state.yearFrom);
-    el.yearTo.value = state.yearTo === null ? '' : String(state.yearTo);
-    el.scoreMin.value = state.scoreMin ? String(state.scoreMin) : '';
-    el.lenMin.value = state.lenMin === null ? '' : String(state.lenMin);
-    el.lenMax.value = state.lenMax === null ? '' : String(state.lenMax);
+    el.year.value = state.year === null ? '' : String(state.year);
+    el.score.value = state.score === null ? '' : String(state.score);
+    el.len.value = state.len === null ? '' : String(state.len);
     el.firstInput.value = state.first;
-  }
-
-  function syncChips() {
-    el.scoreChips.querySelectorAll('[data-score]').forEach((button) => {
-      const on = Number(button.dataset.score) === state.scoreMin;
-      button.classList.toggle('is-on', on);
-      button.setAttribute('aria-pressed', String(on));
-    });
-
-    el.lenChips.querySelectorAll('[data-len]').forEach((button) => {
-      const preset = LEN_PRESETS[Number(button.dataset.len)];
-      const on = preset
-        ? state.lenMin === preset[0] && (state.lenMax === preset[1] || (preset[1] === null && state.lenMax === null))
-        : state.lenMin === null && state.lenMax === null;
-      button.classList.toggle('is-on', on);
-      button.setAttribute('aria-pressed', String(on));
-    });
   }
 
   function setSort(sort) {
@@ -277,23 +292,18 @@
   function resetFilters() {
     state.q = '';
     el.q.value = '';
-    state.yearFrom = null;
-    state.yearTo = null;
-    state.scoreMin = 0;
-    state.lenMin = null;
-    state.lenMax = null;
+    state.year = null;
+    state.score = null;
+    state.len = null;
     state.first = '';
     state.nsfw = false;
     el.nsfw.classList.remove('is-on');
     el.nsfw.setAttribute('aria-pressed', 'false');
     syncInputs();
-    syncChips();
     update(true);
   }
 
-  /* ---------- 交互 ---------- */
-
-  function debounce(fn, wait = 220) {
+  function debounce(fn, wait = 200) {
     let timer = 0;
     return (...args) => {
       clearTimeout(timer);
@@ -311,70 +321,36 @@
     );
 
     const applyYear = debounce(() => {
-      let from = numOrNull(el.yearFrom.value);
-      let to = numOrNull(el.yearTo.value);
-      if (from !== null) from = Math.min(Math.max(from, YEAR_MIN), YEAR_MAX);
-      if (to !== null) to = Math.min(Math.max(to, YEAR_MIN), YEAR_MAX);
-      if (from !== null && to !== null && from > to) to = from;
-      state.yearFrom = from;
-      state.yearTo = to;
-      el.yearFrom.value = from === null ? '' : String(from);
-      el.yearTo.value = to === null ? '' : String(to);
+      let value = numOrNull(el.year.value);
+      if (value !== null) value = Math.min(Math.max(Math.round(value), YEAR_MIN), YEAR_MAX);
+      state.year = value;
+      el.year.value = value === null ? '' : String(value);
       update(true);
     });
-    el.yearFrom.addEventListener('input', applyYear);
-    el.yearTo.addEventListener('input', applyYear);
+    el.year.addEventListener('input', applyYear);
 
     const applyScore = debounce(() => {
-      let value = numOrNull(el.scoreMin.value) || 0;
-      value = Math.min(Math.max(value, 0), 10);
-      state.scoreMin = value;
-      el.scoreMin.value = value ? String(value) : '';
-      syncChips();
+      let value = numOrNull(el.score.value);
+      if (value !== null) value = Math.min(Math.max(value, 0), 10);
+      state.score = value;
+      el.score.value = value === null ? '' : String(value);
       update(true);
     });
-    el.scoreMin.addEventListener('input', applyScore);
+    el.score.addEventListener('input', applyScore);
 
     const applyLen = debounce(() => {
-      let min = numOrNull(el.lenMin.value);
-      let max = numOrNull(el.lenMax.value);
-      if (min !== null) min = Math.max(1, Math.round(min));
-      if (max !== null) max = Math.max(1, Math.round(max));
-      if (min !== null && max !== null && min > max) max = min;
-      state.lenMin = min;
-      state.lenMax = max;
-      el.lenMin.value = min === null ? '' : String(min);
-      el.lenMax.value = max === null ? '' : String(max);
-      syncChips();
+      let value = numOrNull(el.len.value);
+      if (value !== null) value = Math.max(1, Math.round(value));
+      state.len = value;
+      el.len.value = value === null ? '' : String(value);
       update(true);
     });
-    el.lenMin.addEventListener('input', applyLen);
-    el.lenMax.addEventListener('input', applyLen);
+    el.len.addEventListener('input', applyLen);
 
     el.firstInput.addEventListener('input', () => {
       const value = firstChar(el.firstInput.value.trim());
       el.firstInput.value = value;
       state.first = value;
-      update(true);
-    });
-
-    el.scoreChips.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-score]');
-      if (!button) return;
-      state.scoreMin = Number(button.dataset.score);
-      syncInputs();
-      syncChips();
-      update(true);
-    });
-
-    el.lenChips.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-len]');
-      if (!button) return;
-      const preset = LEN_PRESETS[Number(button.dataset.len)];
-      state.lenMin = preset ? preset[0] : null;
-      state.lenMax = preset ? preset[1] : null;
-      syncInputs();
-      syncChips();
       update(true);
     });
 
