@@ -29,6 +29,7 @@
   let filtered = [];
   let rendered = 0;
   let observer = null;
+  let castReady = false;
 
   const el = {
     panel: document.querySelector('.anime-panel'),
@@ -70,33 +71,36 @@
     el.count.textContent = text;
   }
 
-  // 两条线路并发，谁先响应头用谁；另一条立刻中止，不白下第二份数据
-  async function loadRaced(name, timeouts = [30000, 12000]) {
+  // 先走本地 Pages；2.2 秒还没回，再并行发 CDN，谁先完整返回用谁（慢的那条会被中止）
+  async function loadHedged(name, options = {}) {
+    const { firstTimeout = 30000, hedgeDelay = 2200, hedgeTimeout = 12000 } = options;
     const urls = [`./${name}?v=${DATA_VERSION}`, `${CDN_BASE}/${name}`];
-    const controllers = urls.map(() => new AbortController());
-    const timers = urls.map((_, i) => setTimeout(() => controllers[i].abort(), timeouts[i]));
+    const controllers = [new AbortController(), new AbortController()];
+    const timers = [];
 
-    const attempts = urls.map((url, i) =>
-      fetch(url, { signal: controllers[i].signal }).then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return { response, index: i };
-      })
-    );
-
-    try {
-      const winner = await Promise.any(attempts);
-      controllers.forEach((controller, i) => {
-        if (i !== winner.index) controller.abort();
+    const begin = (index, delay) =>
+      new Promise((resolve, reject) => {
+        const fire = () => {
+          fetch(urls[index], { signal: controllers[index].signal })
+            .then((response) => {
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              return response.json();
+            })
+            .then((payload) => {
+              if (!payload || payload.v !== DATA_VERSION) throw new Error('数据版本不匹配');
+              resolve(payload);
+            })
+            .catch(reject);
+        };
+        if (delay) timers.push(setTimeout(fire, delay));
+        else fire();
       });
 
-      const payload = await winner.response.json();
-      if (!payload || payload.v !== DATA_VERSION) {
-        // 版本对不上（浏览器或 CDN 缓存了旧版）：换带版本号的地址重取本地那份
-        const fallback = await fetch(`./${name}?v=${DATA_VERSION}&t=${Date.now()}`).then((response) => response.json());
-        if (!fallback || fallback.v !== DATA_VERSION) throw new Error('数据版本不匹配');
-        return fallback;
-      }
-      return payload;
+    timers.push(setTimeout(() => controllers[0].abort(), firstTimeout));
+    timers.push(setTimeout(() => controllers[1].abort(), hedgeDelay + hedgeTimeout));
+
+    try {
+      return await Promise.any([begin(0, 0), begin(1, hedgeDelay)]);
     } finally {
       timers.forEach(clearTimeout);
       controllers.forEach((controller) => controller.abort());
@@ -111,7 +115,7 @@
 
     try {
       setStatus('正在读取数据…');
-      const core = await loadRaced('data.json');
+      const core = await loadHedged('data.json');
       hints.forEach(clearTimeout);
 
       hydrate(core);
@@ -120,7 +124,7 @@
       update(false);
 
       // 声优 / 制作公司晚一步到，不挡首屏
-      loadRaced('cast.json', [10000, 14000])
+      loadHedged('cast.json', { hedgeDelay: 1200 })
         .then(applyCast)
         .catch(() => {});
     } catch (error) {
@@ -158,6 +162,7 @@
   }
 
   function applyCast(payload) {
+    castReady = true;
     const studios = payload.studios || [''];
     const people = payload.people || [''];
     const index = new Map();
@@ -253,8 +258,10 @@
       return;
     }
     el.progress.hidden = false;
+    const waiting = !castReady && state.q.trim() ? ' · 声优/公司数据还在加载，稍后自动补上' : '';
     el.progress.textContent =
-      rendered >= total ? `已显示全部 ${fmt(total)} 部` : `已显示 ${fmt(rendered)} / ${fmt(total)} 部，继续下滑自动加载`;
+      (rendered >= total ? `已显示全部 ${fmt(total)} 部` : `已显示 ${fmt(rendered)} / ${fmt(total)} 部，继续下滑自动加载`) +
+      waiting;
   }
 
   // 首屏/换条件后，先把视口填满，避免底部大片空白
