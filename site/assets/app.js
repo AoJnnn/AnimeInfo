@@ -13,7 +13,7 @@
   const PLATFORMS = ['TV', 'OVA', '剧场版', 'WEB', '其他'];
   const YEAR_MIN = 1900;
   const YEAR_MAX = 2030;
-  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@main/site';
+  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@c6b046e/site';
 
   const state = {
     q: '',
@@ -68,28 +68,33 @@
     el.count.textContent = text;
   }
 
-  function fetchJSON(url, signal) {
-    return fetch(url, { signal }).then((response) => {
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    });
-  }
-
-  function checked(promise) {
-    return promise.then((payload) => {
-      if (!payload || payload.v !== DATA_VERSION) throw new Error('数据版本不匹配');
-      return payload;
-    });
-  }
-
-  // 两条线路并发，取先到的那份；慢的那条留足时间，别把「慢但能用」的线路掐死
+  // 两条线路并发，谁先响应头用谁；另一条立刻中止，不白下第二份数据
   async function loadRaced(name, timeouts = [30000, 12000]) {
-    const urls = [`./${name}`, `${CDN_BASE}/${name}?v=${DATA_VERSION}`];
+    const urls = [`./${name}`, `${CDN_BASE}/${name}`];
     const controllers = urls.map(() => new AbortController());
     const timers = urls.map((_, i) => setTimeout(() => controllers[i].abort(), timeouts[i]));
 
+    const attempts = urls.map((url, i) =>
+      fetch(url, { signal: controllers[i].signal }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return { response, index: i };
+      })
+    );
+
     try {
-      return await Promise.any(urls.map((url, i) => checked(fetchJSON(url, controllers[i].signal))));
+      const winner = await Promise.any(attempts);
+      controllers.forEach((controller, i) => {
+        if (i !== winner.index) controller.abort();
+      });
+
+      const payload = await winner.response.json();
+      if (!payload || payload.v !== DATA_VERSION) {
+        // 版本对不上（例如 CDN 还没跟上）：退回本地那份
+        const fallback = await fetch(`./${name}`).then((response) => response.json());
+        if (!fallback || fallback.v !== DATA_VERSION) throw new Error('数据版本不匹配');
+        return fallback;
+      }
+      return payload;
     } finally {
       timers.forEach(clearTimeout);
       controllers.forEach((controller) => controller.abort());
