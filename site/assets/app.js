@@ -70,7 +70,7 @@
 
   // 两条线路并发，谁先响应头用谁；另一条立刻中止，不白下第二份数据
   async function loadRaced(name, timeouts = [30000, 12000]) {
-    const urls = [`./${name}`, `${CDN_BASE}/${name}`];
+    const urls = [`./${name}?v=${DATA_VERSION}`, `${CDN_BASE}/${name}`];
     const controllers = urls.map(() => new AbortController());
     const timers = urls.map((_, i) => setTimeout(() => controllers[i].abort(), timeouts[i]));
 
@@ -89,8 +89,8 @@
 
       const payload = await winner.response.json();
       if (!payload || payload.v !== DATA_VERSION) {
-        // 版本对不上（例如 CDN 还没跟上）：退回本地那份
-        const fallback = await fetch(`./${name}`).then((response) => response.json());
+        // 版本对不上（例如浏览器/ CDN 缓存了旧版）：换带版本号的地址重取本地那份
+        const fallback = await fetch(`./${name}?v=${DATA_VERSION}&t=${Date.now()}`).then((response) => response.json());
         if (!fallback || fallback.v !== DATA_VERSION) throw new Error('数据版本不匹配');
         return fallback;
       }
