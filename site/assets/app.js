@@ -133,7 +133,9 @@
         update(false);
       }
 
-      // 第二步：全量数据（约 0.64 MB gzip），到货后替换并启用筛选
+      // 第二步：全量数据（约 0.64 MB gzip），到货后替换并启用筛选；
+      // 声优/公司同时开始下载，等主数据落位后合并
+      const castPromise = loadHedged('cast.json', { hedgeDelay: 1200 }).catch(() => null);
       const core = await loadHedged('data.json');
       hints.forEach(clearTimeout);
 
@@ -145,10 +147,9 @@
       setFiltersEnabled(true);
       update(false);
 
-      // 声优 / 制作公司再晚一步
-      loadHedged('cast.json', { hedgeDelay: 1200 })
-        .then(applyCast)
-        .catch(() => {});
+      castPromise.then((cast) => {
+        if (cast) applyCast(cast);
+      });
     } catch (error) {
       hints.forEach(clearTimeout);
       showError(error);
