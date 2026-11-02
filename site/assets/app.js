@@ -13,7 +13,7 @@
   const PLATFORMS = ['TV', 'OVA', '剧场版', 'WEB', '其他'];
   const YEAR_MIN = 1900;
   const YEAR_MAX = 2030;
-  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@c6b046e/site';
+  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@1eaf3fb/site';
 
   const state = {
     q: '',
