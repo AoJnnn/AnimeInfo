@@ -13,7 +13,9 @@
   const PLATFORMS = ['TV', 'OVA', '剧场版', 'WEB', '其他'];
   const YEAR_MIN = 1900;
   const YEAR_MAX = 2030;
-  const CDN_BASE = 'https://cdn.jsdelivr.net/gh/AoJnnn/AnimeInfo@1eaf3fb/site';
+  // jsDelivr 两个入口：fastly 在国内通常更稳，cdn 作为备选
+  const CDN_HOSTS = ['https://fastly.jsdelivr.net', 'https://cdn.jsdelivr.net'];
+  const CDN_REF = '6c7a067';
 
   const state = {
     q: '',
@@ -74,27 +76,38 @@
     el.count.textContent = text;
   }
 
-  // 先走本地 Pages；2.2 秒还没回，再并行发 CDN，谁先完整返回用谁（慢的那条会被中止）
+  // 先走本地 Pages；2.2 秒还没回，再并行发 CDN（fastly → cdn 两个入口依次试），谁先完整返回用谁
   async function loadHedged(name, options = {}) {
-    const { firstTimeout = 30000, hedgeDelay = 2200, hedgeTimeout = 12000 } = options;
-    const urls = [`./${name}?v=${DATA_VERSION}`, `${CDN_BASE}/${name}`];
+    const { firstTimeout = 30000, hedgeDelay = 2200, hedgeTimeout = 14000 } = options;
     const controllers = [new AbortController(), new AbortController()];
     const timers = [];
 
-    const begin = (index, delay) =>
+    const readOne = (url, signal) =>
+      fetch(url, { signal }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      }).then((payload) => {
+        if (!payload || payload.v !== DATA_VERSION) throw new Error('数据版本不匹配');
+        return payload;
+      });
+
+    const local = () => readOne(`./${name}?v=${DATA_VERSION}`, controllers[0].signal);
+
+    const cdn = async () => {
+      let lastError = new Error('CDN 不可用');
+      for (const host of CDN_HOSTS) {
+        try {
+          return await readOne(`${host}/gh/AoJnnn/AnimeInfo@${CDN_REF}/site/${name}`, controllers[1].signal);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError;
+    };
+
+    const begin = (run, delay) =>
       new Promise((resolve, reject) => {
-        const fire = () => {
-          fetch(urls[index], { signal: controllers[index].signal })
-            .then((response) => {
-              if (!response.ok) throw new Error(`HTTP ${response.status}`);
-              return response.json();
-            })
-            .then((payload) => {
-              if (!payload || payload.v !== DATA_VERSION) throw new Error('数据版本不匹配');
-              resolve(payload);
-            })
-            .catch(reject);
-        };
+        const fire = () => run().then(resolve, reject);
         if (delay) timers.push(setTimeout(fire, delay));
         else fire();
       });
@@ -103,7 +116,7 @@
     timers.push(setTimeout(() => controllers[1].abort(), hedgeDelay + hedgeTimeout));
 
     try {
-      return await Promise.any([begin(0, 0), begin(1, hedgeDelay)]);
+      return await Promise.any([begin(local, 0), begin(cdn, hedgeDelay)]);
     } finally {
       timers.forEach(clearTimeout);
       controllers.forEach((controller) => controller.abort());
