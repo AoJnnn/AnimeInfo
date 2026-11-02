@@ -1,6 +1,6 @@
 /* 番剧索引页逻辑
    数据分两份：
-   data.json  { v, meta, items: [[id, 中文名, 原名, 年份, 评分×10, 排名, 平台码, nsfw, 名字长度, 首字]] }
+   data.json  { v, meta, items: [[id, 中文名, 年份, 评分×10, 排名, 平台码, nsfw, 名字长度, 首字]] }
    cast.json  { v, studios: [...], people: [...], items: [[id, 公司索引, [声优索引...]]] }  ← 首屏之后后台加载
 
    线路：本地 Pages 与 jsDelivr 同时发车，谁先到用谁（国内 Pages 常卡住）。 */
@@ -8,8 +8,8 @@
 (() => {
   'use strict';
 
-  const DATA_VERSION = 2;
-  const PAGE_SIZE = 60;
+  const DATA_VERSION = 3;
+  const PAGE_SIZE = 100;
   const PLATFORMS = ['TV', 'OVA', '剧场版', 'WEB', '其他'];
   const YEAR_MIN = 1900;
   const YEAR_MAX = 2030;
@@ -23,18 +23,19 @@
     first: '',
     sort: 'rank',
     nsfw: false,
-    shown: PAGE_SIZE,
   };
 
   let rows = [];
   let filtered = [];
+  let rendered = 0;
+  let observer = null;
 
   const el = {
     panel: document.querySelector('.anime-panel'),
     list: document.getElementById('anime-list'),
     count: document.getElementById('anime-count'),
-    more: document.getElementById('anime-more'),
-    sortSelect: document.getElementById('sort-select'),
+    progress: document.getElementById('anime-progress'),
+    sentinel: document.getElementById('anime-sentinel'),
     q: document.getElementById('anime-q'),
     nsfw: document.getElementById('anime-nsfw'),
     toggle: document.getElementById('anime-filter-toggle'),
@@ -44,6 +45,7 @@
     score: document.getElementById('score-input'),
     len: document.getElementById('len-input'),
     firstInput: document.getElementById('first-input'),
+    sortSelect: document.getElementById('sort-select'),
   };
 
   const esc = (value) =>
@@ -89,7 +91,7 @@
 
       const payload = await winner.response.json();
       if (!payload || payload.v !== DATA_VERSION) {
-        // 版本对不上（例如浏览器/ CDN 缓存了旧版）：换带版本号的地址重取本地那份
+        // 版本对不上（浏览器或 CDN 缓存了旧版）：换带版本号的地址重取本地那份
         const fallback = await fetch(`./${name}?v=${DATA_VERSION}&t=${Date.now()}`).then((response) => response.json());
         if (!fallback || fallback.v !== DATA_VERSION) throw new Error('数据版本不匹配');
         return fallback;
@@ -104,7 +106,7 @@
   async function boot() {
     const hints = [
       setTimeout(() => setStatus('网络有点慢，正在加载…'), 3500),
-      setTimeout(() => setStatus('还在加载（约 1 MB），请再等一下…'), 8000),
+      setTimeout(() => setStatus('还在加载（约 0.6 MB），请再等一下…'), 8000),
     ];
 
     try {
@@ -114,6 +116,7 @@
 
       hydrate(core);
       bindEvents();
+      observe();
       update(false);
 
       // 声优 / 制作公司晚一步到，不挡首屏
@@ -136,11 +139,10 @@
 
   function hydrate(payload) {
     rows = (payload.items || []).map((item) => {
-      const [id, name, orig, year, scoreX10, rank, plat, nsfw, len, ch] = item;
+      const [id, name, year, scoreX10, rank, plat, nsfw, len, ch] = item;
       return {
         id,
         name,
-        orig,
         year,
         score: scoreX10 / 10,
         rank,
@@ -150,7 +152,7 @@
         ch,
         studio: '',
         cvNames: [],
-        hay: `${name} ${orig}`.toLowerCase(),
+        hay: name.toLowerCase(),
       };
     });
   }
@@ -168,9 +170,7 @@
       row.studio = studios[studioId] || '';
       const cvFull = (cvIds || []).map((i) => people[i] || '');
       row.cvNames = cvFull.map((name) => name.split('|')[0]).filter(Boolean);
-      row.hay = `${row.name} ${row.orig} ${row.studio} ${cvFull
-        .map((name) => name.replace('|', ' '))
-        .join(' ')}`.toLowerCase();
+      row.hay = `${row.name} ${row.studio} ${cvFull.map((name) => name.replace('|', ' ')).join(' ')}`.toLowerCase();
     }
 
     if (state.q.trim()) update(false);
@@ -226,7 +226,6 @@
         <h3 class="anime-name"><a href="https://bgm.tv/subject/${row.id}" target="_blank" rel="noreferrer">${esc(
           row.name
         )}</a></h3>
-        ${row.orig ? `<p class="anime-sub">${esc(row.orig)}</p>` : ''}
         ${matchHint(row)}
       </div>
       <div class="anime-meta"><span>${row.year || '年份未知'}</span><span>${PLATFORMS[row.plat] || '其他'}</span><span>${
@@ -236,12 +235,56 @@
     </article>`;
   }
 
-  function renderList() {
-    const visible = filtered.slice(0, state.shown);
-    el.list.innerHTML = visible.length
-      ? visible.map(rowHtml).join('')
-      : '<p class="anime-empty">没有符合条件的番剧，试试放宽筛选。</p>';
-    el.more.hidden = state.shown >= filtered.length;
+  function renderNext() {
+    if (rendered >= filtered.length) {
+      updateProgress();
+      return;
+    }
+    const end = Math.min(rendered + PAGE_SIZE, filtered.length);
+    el.list.insertAdjacentHTML('beforeend', filtered.slice(rendered, end).map(rowHtml).join(''));
+    rendered = end;
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const total = filtered.length;
+    if (!total) {
+      el.progress.hidden = true;
+      return;
+    }
+    el.progress.hidden = false;
+    el.progress.textContent =
+      rendered >= total ? `已显示全部 ${fmt(total)} 部` : `已显示 ${fmt(rendered)} / ${fmt(total)} 部，继续下滑自动加载`;
+  }
+
+  // 首屏/换条件后，先把视口填满，避免底部大片空白
+  function fillViewport() {
+    let guard = 0;
+    while (rendered < filtered.length && guard < 20) {
+      const bottom = el.progress.getBoundingClientRect().top;
+      if (bottom > window.innerHeight + 300) break;
+      renderNext();
+      guard += 1;
+    }
+  }
+
+  function observe() {
+    if (!('IntersectionObserver' in window)) {
+      window.addEventListener('scroll', () => {
+        if (window.innerHeight + window.scrollY > document.body.offsetHeight - 600) renderNext();
+      });
+      return;
+    }
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          renderNext();
+          fillViewport();
+        }
+      },
+      { rootMargin: '600px 0px' }
+    );
+    observer.observe(el.sentinel);
   }
 
   function activeFilterCount() {
@@ -265,8 +308,17 @@
 
   function update(scrollBack) {
     applyFilters();
-    state.shown = PAGE_SIZE;
-    renderList();
+    rendered = 0;
+    el.list.innerHTML = '';
+
+    if (!filtered.length) {
+      el.list.innerHTML = '<p class="anime-empty">没有符合条件的番剧，试试放宽筛选。</p>';
+      el.progress.hidden = true;
+    } else {
+      renderNext();
+      fillViewport();
+    }
+
     renderCount();
 
     if (scrollBack) {
@@ -376,11 +428,6 @@
       el.nsfw.classList.toggle('is-on', state.nsfw);
       el.nsfw.setAttribute('aria-pressed', String(state.nsfw));
       update(true);
-    });
-
-    el.more.addEventListener('click', () => {
-      state.shown += PAGE_SIZE;
-      renderList();
     });
 
     el.count.addEventListener('click', (event) => {
